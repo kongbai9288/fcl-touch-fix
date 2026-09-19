@@ -114,19 +114,19 @@ function analyze(data){
       // B: 按下 + 点击 同时有输出 —— 一次物理点击 = 2 次完整输出
       if(hasOutput(ev.pressEvent) && hasOutput(ev.clickEvent)){
         issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"B",cfg:cfg,key:"clickEvent",
-          desc:"同时配了<b>按下</b>和<b>点击</b>：手指按下时输出一次，抬起时又输出一次，一次点击 = 2 次触发。"});
+          desc:"同时配了<b>按下</b>和<b>点击</b>：手指按下时输出一次，抬起时又输出一次，一次点击 = 2 次触发。<br>修复方式：<b>保留「按下」，清空「点击」</b>（按住类更跟手）。"});
       }
 
       // C: 点击 + 双击 同时有输出 —— 快速连点两下会额外触发双击
       if(hasOutput(ev.clickEvent) && hasOutput(ev.doubleClickEvent)){
         issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"C",cfg:cfg,key:"doubleClickEvent",
-          desc:"同时配了<b>点击</b>和<b>双击</b>：400ms 内连点两下，除两次点击外还会额外触发一次双击 = 3 次触发。"});
+          desc:"同时配了<b>点击</b>和<b>双击</b>：400ms 内连点两下，除两次点击外还会额外触发一次双击 = 3 次触发。<br>修复方式：<b>清空「双击」，保留单击</b>。"});
       }
 
       // D: 按下 + 长按 同时有输出 —— 按住超过 400ms 叠加
       if(hasOutput(ev.pressEvent) && hasOutput(ev.longPressEvent)){
         issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"D",cfg:cfg,key:"longPressEvent",
-          desc:"同时配了<b>按下</b>和<b>长按</b>：按住超过 400ms 会再叠一次长按输出（连续挖矿/攻击时表现为多打一下）。"});
+          desc:"同时配了<b>按下</b>和<b>长按</b>：按住超过 400ms 会再叠一次长按输出（连续挖矿/攻击时表现为多打一下）。<br>修复方式：清空「长按」（默认不勾选，需自己判断）。"});
       }
     });
   });
