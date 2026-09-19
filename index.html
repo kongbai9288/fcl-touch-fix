@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FCL 按键误触修复器</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;padding:14px;background:#12131a;color:#e8eaf0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK SC",sans-serif;padding-bottom:60px}
+h1{font-size:19px;margin:0 0 4px}
+.sub{color:#8b91a3;font-size:13px;margin-bottom:16px}
+.card{background:#1b1d27;border:1px solid #2b2e3c;border-radius:12px;padding:14px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px;color:#fff}
+button,.btn{display:block;width:100%;padding:13px;border:0;border-radius:10px;background:#3d7eff;color:#fff;font-size:15px;font-weight:600;margin-top:10px}
+button:disabled{background:#3a3d4d;color:#7b8095}
+button.ghost{background:#2b2e3c;color:#c9cee0}
+button.warn{background:#ff6b4a}
+input[type=file]{display:none}
+.lbl{display:block;padding:13px;border-radius:10px;background:#2b2e3c;color:#c9cee0;text-align:center;font-size:15px;font-weight:600;margin-top:10px}
+.stat{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.stat span{background:#232634;border-radius:8px;padding:6px 10px;font-size:13px;color:#9aa1b8}
+.item{border:1px solid #2b2e3c;border-radius:10px;padding:11px;margin-bottom:9px;background:#171922}
+.item.on{border-color:#3d7eff;background:#182135}
+.row{display:flex;align-items:flex-start;gap:10px}
+.row input{margin-top:4px;width:18px;height:18px;flex:none;accent-color:#3d7eff}
+.t{font-weight:600;font-size:14px;color:#fff}
+.d{font-size:12.5px;color:#939ab0;margin-top:3px}
+.tag{display:inline-block;font-size:11px;padding:2px 7px;border-radius:5px;margin-right:5px;font-weight:600}
+.t3{background:#4a1f16;color:#ff9d80}
+.t2{background:#4a3a12;color:#ffd36b}
+.t1{background:#1d3a4a;color:#7fd3ff}
+.n{background:#232634;color:#9aa1b8}
+.hint{background:#231d12;border:1px solid #4a3a12;border-radius:10px;padding:11px;font-size:13px;color:#ffd36b;margin-bottom:12px}
+.ok{background:#142b1d;border:1px solid #235c38;border-radius:10px;padding:11px;font-size:13px;color:#7fe0a3;margin-bottom:12px}
+ol,ul{padding-left:20px;margin:8px 0}
+li{margin:5px 0;font-size:13.5px;color:#c2c8da}
+code{background:#232634;padding:1px 5px;border-radius:4px;font-size:12.5px;color:#9fd0ff}
+.warnbox{background:#2a1618;border:1px solid #6b2530;border-radius:10px;padding:11px;font-size:13px;color:#ff9d9d;margin-bottom:12px}
+details{margin-top:8px}
+summary{font-size:13px;color:#8b91a3}
+</style>
+</head>
+<body>
+
+<h1>FCL 按键误触修复器</h1>
+<div class="sub">修复「点一次触发多次」· 免 root · 不换安装包 · 可一键还原</div>
+
+<div class="card">
+  <h2>① 先完全关闭 FCL</h2>
+  <div class="warnbox">必须在<strong>多任务界面把 FCL 划掉</strong>之后再改文件。FCL 只在启动时读取控制器，运行中改的文件会被它内存里的数据覆盖回去，等于白改。</div>
+  <h2>② 选择控制器文件</h2>
+  <div class="d" style="color:#939ab0;font-size:13px">用文件管理器进入 <code>/sdcard/FCL/control/</code>，里面的 <code>.json</code> 就是控制器（华为手机自带「文件管理」即可）。可逐个修复。</div>
+  <input type="file" id="f" accept=".json,application/json">
+  <label for="f" class="lbl" id="pick">📂 选择 .json 控制器文件</label>
+  <div id="meta"></div>
+</div>
+
+<div id="out"></div>
+
+<script>
+var EMPTY_EVENT = {autoKeep:false,autoClick:false,openMenu:false,switchTouchMode:false,switchMouseMode:false,input:false,quickInput:false,outputText:"",outputKeycodes:[],bindViewGroup:[]};
+
+var raw = null;      // 原始 JSON 对象
+var out = null;      // 可修改副本
+var fname = "";
+var issues = [];     // {group,btn,index,kind,desc}
+var checks = {};     // id -> bool
+
+function emptyEvent(){ return JSON.parse(JSON.stringify(EMPTY_EVENT)); }
+
+// 判断一个事件是否真的会输出（有任意输出内容才算“生效”）
+function hasOutput(e){
+  if(!e) return false;
+  if(e.autoClick) return true;                                   // 连点即使没键码也会触发输出循环
+  if(e.openMenu||e.switchTouchMode||e.switchMouseMode||e.input||e.quickInput) return true;
+  if(Array.isArray(e.outputKeycodes) && e.outputKeycodes.length>0) return true;
+  if(typeof e.outputText === "string" && e.outputText.length>0) return true;
+  if(Array.isArray(e.bindViewGroup) && e.bindViewGroup.length>0) return true;
+  return false;
+}
+
+function btnName(b){
+  var tags = [];
+  var ev = b.event || {};
+  ["pressEvent","longPressEvent","clickEvent","doubleClickEvent"].forEach(function(k){
+    if(hasOutput(ev[k])){
+      var m = {pressEvent:"按下",longPressEvent:"长按",clickEvent:"点击",doubleClickEvent:"双击"}[k];
+      tags.push(m);
+    }
+  });
+  return tags.length ? tags.join("+") : "无输出";
+}
+
+function analyze(data){
+  issues = [];
+  var groups = data.viewGroups || [];
+  groups.forEach(function(g,gi){
+    var bl = (g && g.viewData && g.viewData.buttonList) ? g.viewData.buttonList : [];
+    bl.forEach(function(b,bi){
+      var ev = b.event || {};
+      var name = (b.text && b.text.trim()) ? b.text.trim() : ("按钮#"+(bi+1));
+      var gname = (g && g.name) ? g.name : ("布局"+(gi+1));
+      var cfg = btnName(b);
+
+      // A: 点击/双击上开了 autoClick —— 最凶的“点一下疯狂连发”
+      ["clickEvent","doubleClickEvent"].forEach(function(k){
+        var e = ev[k];
+        if(e && e.autoClick){
+          issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"A",cfg:cfg,key:k,
+            desc:"「"+({clickEvent:"点击",doubleClickEvent:"双击"}[k])+"」开了<b>连续点击(autoClick)</b>：一次触发后会以 20ms 间隔无限循环发送按键，这是「点一次变成无数次」最常见的真凶。"});
+        }
+      });
+
+      // B: 按下 + 点击 同时有输出 —— 一次物理点击 = 2 次完整输出
+      if(hasOutput(ev.pressEvent) && hasOutput(ev.clickEvent)){
+        issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"B",cfg:cfg,key:"clickEvent",
+          desc:"同时配了<b>按下</b>和<b>点击</b>：手指按下时输出一次，抬起时又输出一次，一次点击 = 2 次触发。"});
+      }
+
+      // C: 点击 + 双击 同时有输出 —— 快速连点两下会额外触发双击
+      if(hasOutput(ev.clickEvent) && hasOutput(ev.doubleClickEvent)){
+        issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"C",cfg:cfg,key:"doubleClickEvent",
+          desc:"同时配了<b>点击</b>和<b>双击</b>：400ms 内连点两下，除两次点击外还会额外触发一次双击 = 3 次触发。"});
+      }
+
+      // D: 按下 + 长按 同时有输出 —— 按住超过 400ms 叠加
+      if(hasOutput(ev.pressEvent) && hasOutput(ev.longPressEvent)){
+        issues.push({gi:gi,bi:bi,gname:gname,name:name,kind:"D",cfg:cfg,key:"longPressEvent",
+          desc:"同时配了<b>按下</b>和<b>长按</b>：按住超过 400ms 会再叠一次长按输出（连续挖矿/攻击时表现为多打一下）。"});
+      }
+    });
+  });
+}
+
+function level(k){ return k==="A" ? 3 : (k==="B"||k==="C") ? 2 : 1; }
+function tagHtml(k){
+  var c = level(k)===3?"t3":level(k)===2?"t2":"t1";
+  var t = {A:"严重",B:"重复输出",C:"连点冲突",D:"可选"}[k];
+  return '<span class="tag '+c+'">'+t+'</span>';
+}
+
+function render(){
+  var el = document.getElementById("out");
+  if(!raw) return;
+
+  var total = 0, bad = 0;
+  (raw.viewGroups||[]).forEach(function(g){
+    var bl = (g && g.viewData && g.viewData.buttonList) ? g.viewData.buttonList : [];
+    total += bl.length;
+  });
+  var ids = {};
+  issues.forEach(function(i){ ids[i.gi+"-"+i.bi]=1; });
+  bad = Object.keys(ids).length;
+
+  var h = "";
+  if(issues.length===0){
+    h += '<div class="card"><div class="ok">✅ 未发现会导致「点一次变多次」的配置问题。如果你仍然觉得有误触，那多半是 FCL 本身的多指触摸缺陷（同一按钮被两根手指同时按下时状态会错乱），配置文件改不了，见下方说明。</div></div>';
+  }else{
+    h += '<div class="card"><h2>③ 诊断结果</h2><div class="stat"><span>按钮总数 '+total+'</span><span>有问题的按钮 '+bad+'</span><span>问题项 '+issues.length+'</span></div>';
+    h += '<div class="hint">默认已勾选推荐的修复项（严重 + 重复输出）。<b>长按类(D)</b>默认不勾，因为连续挖矿/攻击常故意这么配，请自己判断。</div>';
+    h += '<div id="list"></div>';
+    h += '<button id="fix">🔧 生成修复后的文件（'+fname+'）</button>';
+    h += '<button class="ghost" id="reset">恢复默认勾选</button></div>';
+  }
+
+  h += '<div class="card"><h2>④ 改完之后</h2><ol>'
+    + '<li>把下载到的文件<strong>覆盖回原位置</strong>，<strong>文件名必须和原来一模一样</strong>（FCL 会删除目录里它不认识的文件名）。</li>'
+    + '<li>建议先备份：把原文件复制一份改名成 <code>同名.json.bak</code> 放在同一目录（<code>.bak</code> 结尾 FCL 不会删，也不会被识别成控制器）。</li>'
+    + '<li>重新启动 FCL，进游戏实测。</li>'
+    + '<li>要还原：把 <code>.bak</code> 改回原名覆盖回去，重启 FCL。</li>'
+    + '</ol></div>';
+
+  h += '<div class="card"><h2>为什么会有延迟？</h2><ul>'
+    + '<li>按键样式在每次按下时重设背景并触发重绘，这些都在主线程排队，触摸事件一多就会积压。</li>'
+    + '<li>指针跟随类按钮每个移动事件都往主线程丢一次指针更新，快速滑动时会堆积。</li>'
+    + '<li>这两点属于 FCL 代码本身，配置文件改不了；把<b>重复输出</b>清掉后，多余的触发消失，体感延迟会明显改善。</li>'
+    + '</ul><details><summary>还有一个是改不掉的？</summary><p style="font-size:13px;color:#939ab0">'
+    + 'FCL 的按钮触摸处理没有区分手指（pointerId）。两根手指按同一个按钮时，按下状态会被来回翻转，抬起时可能漏掉「抬起」信号，表现为按键卡住或像延迟。这是代码缺陷，只能等官方修复或自行编译改过的版本。</p></details></div>';
+
+  el.innerHTML = h;
+
+  var list = document.getElementById("list");
+  if(list){
+    issues.forEach(function(i,n){
+      var id = i.gi+"-"+i.bi+"-"+i.kind;
+      if(checks[id]===undefined) checks[id] = (i.kind==="A"||i.kind==="B"||i.kind==="C");
+      var d = document.createElement("div");
+      d.className = "item" + (checks[id] ? " on" : "");
+      d.innerHTML = '<div class="row"><input type="checkbox" id="c'+n+'" '+(checks[id]?"checked":"")+'>'
+        + '<div><div class="t">'+tagHtml(i.kind)+escapeHtml(i.name)+'</div>'
+        + '<div class="d">'+i.desc+'</div>'
+        + '<div class="d"><span class="tag n">'+escapeHtml(i.gname)+'</span><span class="tag n">当前：'+escapeHtml(i.cfg)+'</span></div></div></div>';
+      list.appendChild(d);
+      d.querySelector("input").onchange = function(){
+        checks[id] = this.checked;
+        d.className = "item" + (this.checked ? " on" : "");
+      };
+    });
+  }
+
+  var fb = document.getElementById("fix");
+  if(fb) fb.onclick = doFix;
+  var rb = document.getElementById("reset");
+  if(rb) rb.onclick = function(){ checks = {}; render(); };
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+
+function doFix(){
+  out = JSON.parse(JSON.stringify(raw));
+  var done = 0;
+  issues.forEach(function(i,n){
+    var id = i.gi+"-"+i.bi+"-"+i.kind;
+    if(!checks[id]) return;
+    var b = out.viewGroups[i.gi].viewData.buttonList[i.bi];
+    if(!b.event) b.event = {};
+    if(i.kind==="A"){
+      // 只关掉连点，保留该事件其它配置
+      b.event[i.key] = b.event[i.key] || emptyEvent();
+      b.event[i.key].autoClick = false;
+    }else{
+      // 清掉冗余的那一个事件
+      b.event[i.key] = emptyEvent();
+    }
+    done++;
+  });
+  if(!done){ alert("没有勾选任何修复项"); return; }
+
+  var text = JSON.stringify(out, null, 2);
+  var blob = new Blob([text], {type:"application/json"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fname;                     // 保持原文件名，避免被 FCL 清理
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 3000);
+  alert("已生成修复文件：" + fname + "\n\n请覆盖回 /sdcard/FCL/control/ 原位置（文件名必须一致），然后重启 FCL。");
+}
+
+document.getElementById("f").onchange = function(){
+  var file = this.files[0];
+  if(!file) return;
+  fname = file.name;
+  var r = new FileReader();
+  r.onload = function(){
+    try{
+      raw = JSON.parse(r.result);
+    }catch(e){
+      alert("解析失败，不是有效的 JSON 文件");
+      return;
+    }
+    if(!raw || !Array.isArray(raw.viewGroups)){
+      alert("这不像 FCL 控制器文件（缺少 viewGroups）");
+      return;
+    }
+    checks = {};
+    document.getElementById("pick").textContent = "📂 " + fname;
+    var nb = 0;
+    raw.viewGroups.forEach(function(g){
+      nb += (g && g.viewData && g.viewData.buttonList) ? g.viewData.buttonList.length : 0;
+    });
+    document.getElementById("meta").innerHTML =
+      '<div class="stat"><span>'+escapeHtml(raw.name||"未命名控制器")+'</span>'
+      +'<span>布局 '+(raw.viewGroups||[]).length+'</span><span>按钮 '+nb+'</span>'
+      +'<span>版本 '+(raw.controllerVersion!==undefined?raw.controllerVersion:"?")+'</span></div>';
+    analyze(raw);
+    render();
+  };
+  r.readAsText(file, "utf-8");
+};
+</script>
+</body>
+</html>
